@@ -9,6 +9,7 @@ from slowfast.utils.parser import load_config, parse_args
 from test_net import test
 from train_net import train
 from visualization import visualize
+import wandb
 
 
 def main():
@@ -17,11 +18,13 @@ def main():
     """
     args = parse_args()
     print("config files: {}".format(args.cfg_files))
+    
     for path_to_config in args.cfg_files:
         cfg = load_config(args, path_to_config)
         cfg = assert_and_infer_cfg(cfg)
 
         # Perform training.
+        
         if cfg.TRAIN.ENABLE:
             launch_job(cfg=cfg, init_method=args.init_method, func=train)
 
@@ -41,9 +44,11 @@ def main():
         ):
             launch_job(cfg=cfg, init_method=args.init_method, func=visualize)
 
-        # Run demo.
+        #Run demo.
         if cfg.DEMO.ENABLE:
             demo(cfg)
+# wandb.login(key='64bd3a663ea0796da19eba13c68c21b188c580c0')
+# wandb.init(project="lapchol_difficulty24", tags=["video_class"], sync_tensorboard=True)
 
 
 if __name__ == "__main__":
