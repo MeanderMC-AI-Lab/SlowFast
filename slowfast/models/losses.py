@@ -21,6 +21,34 @@ class ContrastiveLoss(nn.Module):
         loss = nn.CrossEntropyLoss(reduction=self.reduction).cuda()(inputs, targets)
         return loss
 
+import torch
+import torch.nn as nn
+from pytorchvideo.losses.soft_target_cross_entropy import SoftTargetCrossEntropyLoss
+
+class FixedWeightedSoftTargetCrossEntropyLoss(nn.Module):
+    def __init__(self, normalize_targets=False, reduction='mean'):
+        super(FixedWeightedSoftTargetCrossEntropyLoss, self).__init__()
+        self.normalize_targets = normalize_targets
+        self.reduction = reduction
+        self.loss_func = SoftTargetCrossEntropyLoss(normalize_targets=normalize_targets)
+        self.class_weights = torch.tensor([4, 0, 4], dtype=torch.float32)  # Fixed weights
+
+    def forward(self, inputs, targets):
+        loss = self.loss_func(inputs, targets)
+        
+        if self.class_weights is not None:
+            weights = self.class_weights.to(inputs.device)
+            weighted_loss = torch.sum(weights * targets, dim=-1)
+            loss = loss * weighted_loss
+
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        else:
+            return loss
+
+
 
 class MultipleMSELoss(nn.Module):
     """
@@ -64,6 +92,7 @@ _LOSSES = {
     "bce": nn.BCELoss,
     "bce_logit": nn.BCEWithLogitsLoss,
     "soft_cross_entropy": partial(SoftTargetCrossEntropyLoss, normalize_targets=False),
+    "FixedWeightedSoftTargetCrossEntropyLoss": partial(FixedWeightedSoftTargetCrossEntropyLoss, normalize_targets=False),
     "contrastive_loss": ContrastiveLoss,
     "mse": nn.MSELoss,
     "multi_mse": MultipleMSELoss,

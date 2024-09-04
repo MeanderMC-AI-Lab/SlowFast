@@ -11,7 +11,6 @@ from train_net import train
 from visualization import visualize
 import wandb
 
-
 def main():
     """
     Main function to spawn the train and test process.

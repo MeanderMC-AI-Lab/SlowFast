@@ -27,6 +27,8 @@ from slowfast.models.contrastive import (
 )
 from slowfast.utils.meters import AVAMeter, EpochTimer, TrainMeter, ValMeter
 from slowfast.utils.multigrid import MultigridSchedule
+import wandb
+
 
 logger = logging.get_logger(__name__)
 
@@ -224,7 +226,7 @@ def train_epoch(
                     loss_extra = [one_loss.item() for one_loss in loss_extra]
             else:
                 # Compute the errors.
-                num_topks_correct = metrics.topks_correct(preds, labels, (1, 5))
+                num_topks_correct = metrics.topks_correct(preds, labels, (1, 1))
                 top1_err, top5_err = [
                     (1.0 - x / preds.size(0)) * 100.0 for x in num_topks_correct
                 ]
@@ -298,6 +300,7 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg, train_loader, write
     # Evaluation mode enabled. The running stats would not be updated.
     model.eval()
     val_meter.iter_tic()
+    loss_fun = losses.get_loss_func(cfg.MODEL.LOSS_FUNC)(reduction="mean")
 
     for cur_iter, (inputs, labels, index, time, meta) in enumerate(val_loader):
         if cfg.NUM_GPUS:
@@ -365,6 +368,8 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg, train_loader, write
                 preds = torch.sum(probs, 1)
             else:
                 preds = model(inputs)
+                
+                
 
             if cfg.DATA.MULTI_LABEL:
                 if cfg.NUM_GPUS > 1:
@@ -373,7 +378,10 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg, train_loader, write
                 if cfg.DATA.IN22k_VAL_IN1K != "":
                     preds = preds[:, :1000]
                 # Compute the errors.
-                num_topks_correct = metrics.topks_correct(preds, labels, (1, 5))
+                num_topks_correct = metrics.topks_correct(preds, labels, (1, 1))
+                
+                val_loss = loss_fun(preds, labels)
+                
 
                 # Combine the errors across the GPUs.
                 top1_err, top5_err = [
@@ -383,13 +391,16 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg, train_loader, write
                     top1_err, top5_err = du.all_reduce([top1_err, top5_err])
 
                 # Copy the errors from GPU to CPU (sync point).
-                top1_err, top5_err = top1_err.item(), top5_err.item()
+                val_loss, top1_err, top5_err = val_loss.item(), top1_err.item(), top5_err.item()
+                
+                
 
                 val_meter.iter_toc()
                 # Update and log stats.
                 val_meter.update_stats(
                     top1_err,
                     top5_err,
+                    val_loss,
                     batch_size
                     * max(
                         cfg.NUM_GPUS, 1
@@ -398,14 +409,17 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg, train_loader, write
                 # write to tensorboard format if available.
                 if writer is not None:
                     writer.add_scalars(
-                        {"Val/Top1_err": top1_err, "Val/Top5_err": top5_err},
+                        {"Val/Top1_err": top1_err, "Val/Top5_err": top5_err, "Val/Loss": val_loss,},
                         global_step=len(val_loader) * cur_epoch + cur_iter,
                     )
 
             val_meter.update_predictions(preds, labels)
+       
 
+        
         val_meter.log_iter_stats(cur_epoch, cur_iter)
         val_meter.iter_tic()
+    
 
     # Log epoch stats.
     val_meter.log_epoch_stats(cur_epoch)
@@ -419,8 +433,8 @@ def eval_epoch(val_loader, model, val_meter, cur_epoch, cfg, train_loader, write
             if cfg.NUM_GPUS:
                 all_preds = [pred.cpu() for pred in all_preds]
                 all_labels = [label.cpu() for label in all_labels]
-            writer.plot_eval(preds=all_preds, labels=all_labels, global_step=cur_epoch)
-
+            writer.plot_eval(preds=all_preds, labels=all_labels, global_step=cur_epoch)        
+    torch.cuda.empty_cache()
     val_meter.reset()
 
 

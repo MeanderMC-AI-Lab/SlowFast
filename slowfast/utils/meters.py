@@ -693,6 +693,8 @@ class ValMeter:
         self.iter_timer = Timer()
         self.data_timer = Timer()
         self.net_timer = Timer()
+        self.loss = ScalarMeter(cfg.LOG_PERIOD)
+        self.loss_total = 0.0
         # Current minibatch errors (smoothed over a window).
         self.mb_top1_err = ScalarMeter(cfg.LOG_PERIOD)
         self.mb_top5_err = ScalarMeter(cfg.LOG_PERIOD)
@@ -711,6 +713,8 @@ class ValMeter:
         """
         Reset the Meter.
         """
+        self.loss.reset()
+        self.loss_total = 0.0
         self.iter_timer.reset()
         self.data_timer.reset()
         self.net_timer.reset()
@@ -740,7 +744,7 @@ class ValMeter:
         self.data_timer.pause()
         self.net_timer.reset()
 
-    def update_stats(self, top1_err, top5_err, mb_size):
+    def update_stats(self, top1_err, top5_err, loss, mb_size):
         """
         Update the current stats.
         Args:
@@ -753,6 +757,23 @@ class ValMeter:
         self.num_top1_mis += top1_err * mb_size
         self.num_top5_mis += top5_err * mb_size
         self.num_samples += mb_size
+
+        self.loss.add_value(loss)
+        self.loss_total += loss * mb_size
+
+        if (
+                self._cfg.TRAIN.KILL_LOSS_EXPLOSION_FACTOR > 0.0
+                and len(self.loss.deque) > 6
+            ):
+                prev_loss = 0.0
+                for i in range(2, 7):
+                    prev_loss += self.loss.deque[len(self.loss.deque) - i]
+                if loss > self._cfg.TRAIN.KILL_LOSS_EXPLOSION_FACTOR * prev_loss / 5.0:
+                    raise RuntimeError(
+                        "ERROR: Got Loss explosion of {} {}".format(
+                            loss, datetime.datetime.now()
+                        )
+                    )
 
     def update_predictions(self, preds, labels):
         """
@@ -781,6 +802,7 @@ class ValMeter:
             "epoch": "{}/{}".format(cur_epoch + 1, self._cfg.SOLVER.MAX_EPOCH),
             "iter": "{}/{}".format(cur_iter + 1, self.max_iter),
             "time_diff": self.iter_timer.seconds(),
+            "loss": self.loss.get_win_median(),
             "eta": eta,
             "gpu_mem": "{:.2f}G".format(misc.gpu_mem_usage()),
         }
@@ -812,11 +834,13 @@ class ValMeter:
             top5_err = self.num_top5_mis / self.num_samples
             self.min_top1_err = min(self.min_top1_err, top1_err)
             self.min_top5_err = min(self.min_top5_err, top5_err)
+            avg_loss = self.loss_total / self.num_samples
 
             stats["top1_err"] = top1_err
             stats["top5_err"] = top5_err
             stats["min_top1_err"] = self.min_top1_err
             stats["min_top5_err"] = self.min_top5_err
+            stats["loss"] = avg_loss
 
         logging.log_json_stats(stats, self.output_dir)
 

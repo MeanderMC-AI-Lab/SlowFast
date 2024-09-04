@@ -78,7 +78,7 @@ def run_visualization(vis_loader, model, cfg, writer=None):
         )
     logger.info("Finish drawing weights.")
     global_idx = -1
-    for inputs, labels, _, meta in tqdm.tqdm(vis_loader):
+    for inputs, labels, _, _, meta in tqdm.tqdm(vis_loader):
         if cfg.NUM_GPUS:
             # Transfer the data to the current GPU device.
             if isinstance(inputs, (list,)):
@@ -274,6 +274,7 @@ def visualize(cfg):
 
         # Create video testing loaders.
         vis_loader = loader.construct_loader(cfg, "test")
+        
 
         if cfg.DETECTION.ENABLE:
             assert cfg.NUM_GPUS == cfg.TEST.BATCH_SIZE or cfg.NUM_GPUS == 0
@@ -321,6 +322,7 @@ def visualize(cfg):
                 "Visualize model analysis for {} iterations".format(len(vis_loader))
             )
             # Run visualization on the model
+            
             run_visualization(vis_loader, model, cfg, writer)
         if cfg.TENSORBOARD.WRONG_PRED_VIS.ENABLE:
             logger.info(
